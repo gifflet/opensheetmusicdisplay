@@ -1,5 +1,5 @@
 {
-  "name": "opensheetmusicdisplay",
+  "name": "@gifflet/opensheetmusicdisplay",
   "version": "1.9.7-patch.1",
   "description": "An open source JavaScript engine for displaying MusicXML based on VexFlow.",
   "main": "build/opensheetmusicdisplay.min.js",
