@@ -250,6 +250,9 @@ export declare class EngravingRules {
      */
     LyricsAlignmentStandard: TextAlignmentEnum;
     LyricsHeight: number;
+    /** Whether to re-link lyric word chains split across voices of the same instrument
+     * after reading, so that dashes are drawn between their syllables. */
+    RelinkLyricWordsAcrossVoices: boolean;
     LyricsYOffsetToStaffHeight: number;
     LyricsYMarginToBottomLine: number;
     /** Extra x-shift (to the right) for short lyrics to be better vertically aligned.

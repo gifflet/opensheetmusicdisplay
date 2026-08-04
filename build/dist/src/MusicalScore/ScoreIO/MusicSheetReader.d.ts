@@ -30,6 +30,19 @@ export declare class MusicSheetReader {
     private trimString;
     private _lastElement;
     private _createMusicSheet;
+    /**
+     * Re-links lyric word chains whose syllables are split across voices of the same
+     * instrument (e.g. the soprano holds a note while the alto carries the next syllable
+     * of the word). Each voice is parsed by its own LyricsReader, so a "begin" syllable
+     * in one voice never meets its "end" in another and no dash is drawn between them.
+     * Only verses that contain broken chains are rebuilt (in timestamp order); verses
+     * with well-formed words — including voices carrying genuinely different lyrics —
+     * are left untouched.
+     */
+    private relinkLyricWordsAcrossVoices;
+    /** A verse needs re-linking when a non-single syllable has no word (orphan)
+     *  or a word chain does not start with "begin" and finish with "end". */
+    private hasBrokenLyricWordChains;
     private initializeReading;
     /**
      * Check if all (should there be any apart from the first Measure) [[RhythmInstruction]]s in the [[SourceMeasure]] are the same.
