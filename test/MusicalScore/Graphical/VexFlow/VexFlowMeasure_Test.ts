@@ -650,4 +650,67 @@ describe("VexFlow Measure", () => {
       }).catch(done);
    });
 
+
+   // Non-regression test for grace notes in tablature staves (#1721). A tab measure converted its grace notes to
+   // Vexflow TabNotes, but then dropped them: like in classical measures they are no tickables of the Vexflow voice,
+   // but unlike there they were never attached to their main note either, so they were not drawn at all. Now each
+   // grace note is a Vexflow GraceTabNote (a TabNote with a smaller fret number) inside a GraceNoteGroup modifier
+   // of its main note's TabNote, which formats and draws it left of the main note.
+   /** The fret numbers drawn in the SVG, from left to right: TabNote.drawPositions() writes each as a <text> inside the
+    *  note's <g class="vf-tabnote">. (Document order differs: a grace note is drawn as a modifier after its main note.) */
+   function drawnFretNumbers(div: HTMLElement): { text: string, fontSize: string, x: number }[] {
+      const fretNumbers: { text: string, fontSize: string, x: number }[] = [];
+      div.querySelectorAll("g.vf-tabnote text").forEach((textElement: Element) => {
+         fretNumbers.push({
+            text: textElement.textContent,
+            fontSize: textElement.getAttribute("font-size"),
+            x: Number(textElement.getAttribute("x"))
+         });
+      });
+      return fretNumbers.sort((a, b) => a.x - b.x);
+   }
+
+   it("Draws a grace note in a tablature staff as a smaller fret number attached to its main note (#1721)", (done: Mocha.Done) => {
+      // one 3/4 measure on a guitar TAB staff: a quarter note (string 2, fret 0),
+      //   then a slashed eighth grace note (string 1, fret 1) before a half note (string 1, fret 3)
+      const score: Document = TestUtils.getScore("test_tab_grace_note_simple.musicxml");
+      const div: HTMLElement = TestUtils.getDivElement(document);
+      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(div);
+      osmd.load(score).then(() => {
+         osmd.render();
+         const tabMeasure: GraphicalMeasure = osmd.GraphicSheet.MeasureList[0][0];
+         expect(tabMeasure.isTabMeasure, "the only staff is a tablature staff").to.equal(true);
+         expect(tabMeasure.staffEntries.length, "two staff entries: the quarter note, and the grace note with its half note").to.equal(2);
+
+         const graceStaffEntry: GraphicalStaffEntry = tabMeasure.staffEntries[1];
+         const graceGve: VexFlowVoiceEntry = graceStaffEntry.graphicalVoiceEntries.find(
+            (gve: GraphicalVoiceEntry) => gve.parentVoiceEntry.IsGrace) as VexFlowVoiceEntry;
+         const mainGve: VexFlowVoiceEntry = graceStaffEntry.graphicalVoiceEntries.find(
+            (gve: GraphicalVoiceEntry) => !gve.parentVoiceEntry.IsGrace) as VexFlowVoiceEntry;
+         expect(graceGve !== undefined && mainGve !== undefined, "the grace note and the half note share a staff entry").to.equal(true);
+         expect((graceGve.notes[0].sourceNote as TabNote).FretNumber, "the grace note is on fret 1").to.equal(1);
+         expect(graceGve.parentVoiceEntry.ParentVoice, "the grace note and the half note are in the same voice")
+            .to.equal(mainGve.parentVoiceEntry.ParentVoice);
+
+         // the grace note is a Vexflow GraceTabNote (fret number drawn at a smaller scale) ...
+         const vfGraceNote: any = graceGve.vfStaveNote;
+         expect(vfGraceNote.getCategory(), "the grace note was converted to a GraceTabNote").to.equal("gracetabnotes");
+         expect(vfGraceNote.render_options.scale, "a GraceTabNote's fret number is scaled down").to.be.lessThan(1);
+         // ... attached to the half note's TabNote in a GraceNoteGroup, which draws it left of the main note
+         const graceNoteGroups: any[] = (mainGve.vfStaveNote as any).modifiers.filter(
+            (modifier: any) => modifier.getCategory() === "gracenotegroups");
+         expect(graceNoteGroups.length, "the main note carries one GraceNoteGroup").to.equal(1);
+         expect(graceNoteGroups[0].getGraceNotes(), "which holds the grace note").to.deep.equal([vfGraceNote]);
+
+         // the SVG contains all three fret numbers, the grace note's in a smaller font and left of its main note
+         const fretNumbers: { text: string, fontSize: string, x: number }[] = drawnFretNumbers(div);
+         expect(fretNumbers.map((fretNumber) => fretNumber.text), "fret numbers drawn: 0, 1 (grace), 3").to.deep.equal(["0", "1", "3"]);
+         expect(fretNumbers[0].fontSize, "normal fret number font").to.equal("10pt");
+         expect(fretNumbers[1].fontSize, "grace fret number in a smaller font").to.equal("7.5pt");
+         expect(fretNumbers[2].fontSize, "normal fret number font").to.equal("10pt");
+         expect(fretNumbers[1].x, "the grace fret number is drawn left of the half note's fret number").to.be.lessThan(fretNumbers[2].x);
+         expect(fretNumbers[1].x, "and right of the quarter note's fret number").to.be.greaterThan(fretNumbers[0].x);
+         done();
+      }).catch(done);
+   });
 });
