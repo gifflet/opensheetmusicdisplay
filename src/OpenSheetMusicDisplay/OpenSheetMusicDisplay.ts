@@ -380,6 +380,8 @@ export class OpenSheetMusicDisplay {
      * or the first after load(), render() or resetIncrementalRendering() -- starts a fresh session: it
      * clears the container and lays the score out from the first measure. Each later call appends the next
      * batch. Returns progress; once `done` is true the whole sheet is rendered and further calls are no-ops.
+     * Page labels are drawn with the batch that finalizes their position: the title block (title, subtitle,
+     * composer, lyricist) with the first batch, the copyright (below the last system) with the final batch.
      *
      * Pair with {@link enableIncrementalRenderingOnScroll} for scroll-to-load, or {@link renderRemaining}
      * to finish synchronously (e.g. before PDF/image export). Works for the endless vertical-scroll page

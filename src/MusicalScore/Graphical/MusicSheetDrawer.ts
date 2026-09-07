@@ -573,14 +573,26 @@ export abstract class MusicSheetDrawer {
                 this.drawMusicSystem(system);
             }
         }
-        // The title/credits block belongs to the first system's batch only; a lazy continuation batch
-        // (FromIndex > 0) must not redraw it on top of the already-drawn block.
-        if (page === page.Parent.MusicPages[0] && !(lazySelective && this.LazyDrawSystemsFromIndex > 0) && !this.LazySkipPageLabels) {
+        // Page labels: the title block (title, subtitle, composer, lyricist) sits above the first system, the
+        // copyright below the last one. A lazy (incremental) render draws each with the batch that draws the
+        // system it is anchored to: the title block with the batch drawing the first system (the first batch, or a
+        // reconciliation batch redrawing everything) -- a continuation batch (FromIndex > 0) must not redraw it on
+        // top of the already-drawn block -- and the copyright only with the batch drawing the last system, the
+        // final one. Every earlier batch holds its last system back, and the copyright's anchor, the last system of
+        // the still-growing layout, moves down with each appended batch: a copyright drawn earlier would be left
+        // behind in the middle of the score, since the drawn text isn't moved along (and couldn't be on a Canvas) (#1710).
+        if (page === page.Parent.MusicPages[0] && !this.LazySkipPageLabels) {
+            const drawsFirstSystem: boolean = !lazySelective || this.LazyDrawSystemsFromIndex === 0;
+            const drawsLastSystem: boolean = !lazySelective || this.LazyDrawSystemsToIndexExcl >= page.MusicSystems.length;
             // Page labels span the full page width and are drawn once, in full. Under lazy-horizontal this is
             // the final batch; open the x-window so labels left of its frontier aren't dropped. No-op otherwise.
             const savedForcePageLabels: boolean = this.LazyForcePageLabels;
             this.LazyForcePageLabels = true;
             for (const label of page.Labels) {
+                const drawsAnchorSystem: boolean = label.AnchoredToPageBottom ? drawsLastSystem : drawsFirstSystem;
+                if (!drawsAnchorSystem) {
+                    continue; // drawn by another batch (or already drawn by an earlier one)
+                }
                 label.SVGNode = this.drawLabel(label, <number>GraphicalLayers.Notes);
             }
             this.LazyForcePageLabels = savedForcePageLabels;

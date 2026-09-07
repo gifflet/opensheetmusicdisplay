@@ -27,6 +27,12 @@ export class GraphicalLabel extends Clickable {
      *  Named like GraphicalNote.sourceNote, which holds the same kind of reference.
      */
     public sourceNote: Note;
+    /** Whether this page label is positioned from the page bottom, i.e. below the last music system, like the
+     *  copyright (see MusicSheetCalculator.calculatePageLabels()), rather than from the page top like the title
+     *  block (title, subtitle, composer, lyricist). While an incremental render (OpenSheetMusicDisplay.renderNext())
+     *  grows the page, the last system moves down with every batch, so such a label is drawn only with the final
+     *  batch, once its position is final (#1710). */
+    public AnchoredToPageBottom: boolean = false;
 
     /**
      * Creates a new GraphicalLabel from a Label

@@ -2682,6 +2682,7 @@ export abstract class MusicSheetCalculator {
             relative.y = lastSystemAbsoluteBottomMargin + this.rules.SheetCopyrightMargin;
             relative.y -= copyright.PositionAndShape.BorderTop;
             copyright.PositionAndShape.RelativePosition = relative;
+            copyright.AnchoredToPageBottom = true; // below the last system: drawn only once the layout is complete (#1710)
             page.Labels.push(copyright);
         }
         // we need to do this again to not cut off the title for short scores:
