@@ -133,6 +133,9 @@ export class Note {
     public get ParentStaffEntry(): SourceStaffEntry {
         return this.parentStaffEntry;
     }
+    public set ParentStaffEntry(value: SourceStaffEntry) {
+        this.parentStaffEntry = value;
+    }
     public get ParentStaff(): Staff {
         return this.parentStaffEntry.ParentStaff;
     }

@@ -36,6 +36,12 @@ export class VexFlowStaffEntry extends GraphicalStaffEntry {
                 if (!gve.vfStaveNote.preFormatted) {
                     continue;
                 }
+                if (gve.parentVoiceEntry?.GraceAfterMainNote) {
+                    // grace notes after their main note (e.g. a Nachschlag ending a trill) share the main note's staff entry
+                    //   (see InstrumentReader.attachGraceNotesAfterMainNote), but are drawn as their own small notes right of it:
+                    //   they must neither set the staff entry's x position (cursor position) nor widen its bounding box (slur endpoints).
+                    continue;
+                }
                 gve.applyBordersFromVexflow();
                 let isSecondaryWholeRest: boolean = false;
                 let bboxToAdjust: BoundingBox = this.PositionAndShape;

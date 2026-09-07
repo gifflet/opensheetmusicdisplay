@@ -59,6 +59,11 @@ export class VexFlowTabMeasure extends VexFlowMeasure {
                     gve.vfStaveNote = VexFlowConverter.CreateTabNote(gve); // a GraceTabNote (smaller fret number) for a grace note
                 }
                 if (gve.parentVoiceEntry.IsGrace) {
+                    if (gve.parentVoiceEntry.GraceAfterMainNote) {
+                        // grace notes after their main note (see InstrumentReader.attachGraceNotesAfterMainNote):
+                        //   drawn as their own tickables right of the main note (added to the vexflow voice below)
+                        continue;
+                    }
                     graceGVoiceEntriesBefore.push(gve);
                     graceSlur = graceSlur || gve.parentVoiceEntry.GraceSlur;
                     continue;

@@ -22,7 +22,7 @@ import {ChordSymbolReader} from "./MusicSymbolModules/ChordSymbolReader";
 import {ExpressionReader} from "./MusicSymbolModules/ExpressionReader";
 import {RepetitionInstructionReader} from "./MusicSymbolModules/RepetitionInstructionReader";
 import {SlurReader} from "./MusicSymbolModules/SlurReader";
-import {StemDirectionType} from "../VoiceData/VoiceEntry";
+import {StemDirectionType, VoiceEntry} from "../VoiceData/VoiceEntry";
 import {NoteType, NoteTypeHandler} from "../VoiceData/NoteType";
 import { SystemLinesEnumHelper } from "../Graphical/SystemLinesEnum";
 import { ReaderPluginManager } from "./ReaderPluginManager";
@@ -556,6 +556,7 @@ export class InstrumentReader {
           voiceGenerator.checkForOpenBeam();
         }
       }
+      this.attachGraceNotesAfterMainNote();
       if (this.currentXmlMeasureIndex === this.xmlMeasureList.length - 1) {
         for (let i: number = 0; i < this.instrument.Staves.length; i++) {
           if (!this.activeClefsHaveBeenInitialized[i]) {
@@ -593,6 +594,53 @@ export class InstrumentReader {
     this.previousMeasure = this.currentMeasure;
     this.currentXmlMeasureIndex += 1;
     return true;
+  }
+
+  /**
+   * Attaches grace notes after the last main note of a staff in this measure (a Nachschlag, e.g. the two small notes ending
+   * a trill: MusicXML puts them after their main note, without a following note) to that main note's [[SourceStaffEntry]],
+   * marked with VoiceEntry.GraceAfterMainNote. Having no duration, they were read into an own staff entry at the main note's
+   * end timestamp, i.e. at the end of the measure, which made the cursor stop on them separately (#1706) and even lengthened
+   * the measure by their notated length (SourceMeasure.Duration). They are still drawn right of the main note as their own
+   * small notes (VexFlowMeasure.graphicalMeasureCreatedCalculations). The emptied staff entry is removed afterwards by
+   * MusicSheetReader.checkSourceMeasureForNullEntries(). Grace notes before a following main note are not affected.
+   */
+  private attachGraceNotesAfterMainNote(): void {
+    for (let staffIndexInInstrument: number = 0; staffIndexInInstrument < this.instrument.Staves.length; staffIndexInInstrument++) {
+      const staffIndex: number = this.inSourceMeasureInstrumentIndex + staffIndexInInstrument;
+      // one pass over the voice entries of the staff (in timestamp order) for the grace notes after its last main note,
+      //   and for the last main note of each voice, which is the main note they belong to
+      const lastMainVoiceEntries: { [voiceId: number]: VoiceEntry } = {};
+      let graceVoiceEntriesAfterMainNote: VoiceEntry[] = [];
+      for (const container of this.currentMeasure.VerticalSourceStaffEntryContainers) {
+        const staffEntry: SourceStaffEntry = container.StaffEntries[staffIndex];
+        if (!staffEntry) {
+          continue;
+        }
+        for (const voiceEntry of staffEntry.VoiceEntries) {
+          if (voiceEntry.IsGrace) {
+            graceVoiceEntriesAfterMainNote.push(voiceEntry);
+          } else {
+            lastMainVoiceEntries[voiceEntry.ParentVoice.VoiceId] = voiceEntry;
+            graceVoiceEntriesAfterMainNote = []; // grace notes before this main note stay in its staff entry
+          }
+        }
+      }
+      for (const graceVoiceEntry of graceVoiceEntriesAfterMainNote) {
+        const mainStaffEntry: SourceStaffEntry = lastMainVoiceEntries[graceVoiceEntry.ParentVoice.VoiceId]?.ParentSourceStaffEntry;
+        if (!mainStaffEntry) {
+          continue; // no main note of this voice in the measure: leave the grace note where it is
+        }
+        graceVoiceEntry.GraceAfterMainNote = true;
+        const graceStaffEntry: SourceStaffEntry = graceVoiceEntry.ParentSourceStaffEntry;
+        if (graceStaffEntry !== mainStaffEntry) {
+          graceStaffEntry.VoiceEntries.splice(graceStaffEntry.VoiceEntries.indexOf(graceVoiceEntry), 1);
+          graceVoiceEntry.ParentSourceStaffEntry = mainStaffEntry; // also re-parents its notes
+          graceVoiceEntry.Timestamp = mainStaffEntry.Timestamp.clone();
+          mainStaffEntry.VoiceEntries.push(graceVoiceEntry); // after the main note and its grace notes before it
+        }
+      }
+    }
   }
 
   private getStemDirectionAndColors(xmlNode: IXmlElement): [StemDirectionType, string, string] {
