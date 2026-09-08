@@ -25,7 +25,8 @@ import { Note } from "../../../../src/MusicalScore/VoiceData/Note";
 import { TabNote } from "../../../../src/MusicalScore/VoiceData/TabNote";
 import { PointF2D } from "../../../../src/Common/DataObjects/PointF2D";
 import { GraphicalTie } from "../../../../src/MusicalScore/Graphical/GraphicalTie";
-import { AccidentalEnum, Pitch } from "../../../../src/Common/DataObjects/Pitch";
+import { AccidentalEnum, NoteEnum, Pitch } from "../../../../src/Common/DataObjects/Pitch";
+import { GraphicalNote } from "../../../../src/MusicalScore/Graphical/GraphicalNote";
 
 describe("VexFlow Measure", () => {
 
@@ -312,6 +313,74 @@ describe("VexFlow Measure", () => {
          expect(allVfTuplets[0].notes, "the triplet has to contain the hidden note").to.include(hiddenVfStaveNote);
          done();
       }).catch(done);
+   });
+
+   // A hidden unison note drawn for its visible partner (see the two tests above) takes that partner's notehead
+   // color. Where Vexflow merges the two heads into one column, its head is inked exactly over the visible one
+   // (after it, if its voice comes later) and must not overprint a color set on that note - e.g. by an app
+   // highlighting the notes under the cursor, which never sees the hidden note. Where the head is laid out
+   // beside the visible one, it's colored like the head it stands in for.
+   it("Colors the drawn notehead of a hidden unison note like the visible note whose head it shares", async () => {
+      // the Arabesque bar of the test above with the visible voice-1 note colored red: once as an eighth note, whose
+      // head Vexflow merges with the hidden eighth's (same shape), once as the original half note, whose head can't
+      // merge with it, so the hidden head is laid out beside it
+      const tripletTail: string = `
+         <note><pitch><step>A</step><octave>3</octave></pitch><duration>4</duration><voice>2</voice><type>eighth</type>
+            <time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>
+            <stem>up</stem><beam number="1">continue</beam></note>
+         <note><pitch><step>C</step><alter>1</alter><octave>4</octave></pitch><duration>4</duration><voice>2</voice><type>eighth</type>
+            <time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>
+            <stem>up</stem><beam number="1">end</beam><notations><tuplet type="stop"/></notations></note>`;
+      const hiddenTripletEighth: string = `
+         <note print-object="no"><pitch><step>F</step><alter>1</alter><octave>3</octave></pitch><duration>4</duration><voice>2</voice>
+            <type>eighth</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>
+            <stem>up</stem><beam number="1">begin</beam><notations><tuplet type="start" bracket="no"/></notations></note>`;
+      const redHalf: string = `
+         <note color="#FF0000"><pitch><step>F</step><alter>1</alter><octave>3</octave></pitch><duration>12</duration><voice>1</voice>
+            <type>half</type><stem>down</stem></note>`;
+      const redEighth: string = `
+         <note color="#FF0000"><pitch><step>F</step><alter>1</alter><octave>3</octave></pitch><duration>3</duration><voice>1</voice>
+            <type>eighth</type><stem>down</stem></note>
+         <note><rest/><duration>3</duration><voice>1</voice><type>eighth</type></note>
+         <note><rest/><duration>6</duration><voice>1</voice><type>quarter</type></note>`;
+      const bar: (voice1: string) => string = (voice1: string) => `<?xml version="1.0" encoding="UTF-8"?>
+         <score-partwise version="3.0"><part-list><score-part id="P1"><part-name/></score-part></part-list>
+         <part id="P1"><measure number="1">
+            <attributes><divisions>6</divisions><key><fifths>4</fifths></key><time><beats>2</beats><beat-type>4</beat-type></time>
+               <clef><sign>F</sign><line>4</line></clef></attributes>
+            ${voice1}<backup><duration>12</duration></backup>${hiddenTripletEighth}${tripletTail}
+         </measure></part></score-partwise>`;
+
+      for (const [variant, voice1, headsMerged] of [["merged", redEighth, true], ["displaced", redHalf, false]] as [string, string, boolean][]) {
+         const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+         await osmd.load(bar(voice1));
+         osmd.render();
+         const gm: GraphicalMeasure = osmd.GraphicSheet.findGraphicalMeasure(0, 0);
+         let hiddenHead: any;
+         let visibleHead: any;
+         for (const se of gm.staffEntries) {
+            for (const gve of se.graphicalVoiceEntries) {
+               for (let i: number = 0; i < gve.notes.length; i++) {
+                  const note: GraphicalNote = gve.notes[i];
+                  if (note.sourceNote.isRest() || note.sourceNote.Pitch.FundamentalNote !== NoteEnum.F) {
+                     continue;
+                  }
+                  const head: any = ((gve as VexFlowVoiceEntry).vfStaveNote as any).note_heads[i];
+                  if (note.sourceNote.PrintObject) {
+                     visibleHead = head;
+                  } else {
+                     hiddenHead = head;
+                  }
+               }
+            }
+         }
+         expect(hiddenHead, `${variant}: should find the hidden unison note`).to.not.be.undefined;
+         expect(visibleHead, `${variant}: should find the visible unison note`).to.not.be.undefined;
+         // premise: the two heads share a column for same-shaped heads, and don't for an eighth under a half note
+         expect(hiddenHead.getAbsoluteX() === visibleHead.getAbsoluteX(), `${variant}: heads share one column`).to.equal(headsMerged);
+         expect(visibleHead.getStyle()?.fillStyle, `${variant}: visible notehead keeps its XML color`).to.equal("#FF0000");
+         expect(hiddenHead.getStyle()?.fillStyle, `${variant}: hidden unison notehead is colored like the visible one`).to.equal("#FF0000");
+      }
    });
 
    // Non-regression test for EngravingRules.RenderMeasureNumbersForImplicitMeasures.

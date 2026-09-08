@@ -230,13 +230,20 @@ export class Note {
      * (test_unison_notehead_moonlight_sonata_measure37), or the first note of a triplet sharing a half note's
      * notehead in Debussy's Arabesque no. 1 m.3 (test_unison_notehead_tuplet_arabesque_measure3). */
     public sharesNoteheadWithVisibleUnisonNote(): boolean {
+        return this.visibleUnisonNoteSharingNotehead() !== undefined;
+    }
+
+    /** The visible note in another voice whose notehead this note shares (see
+     * {@link sharesNoteheadWithVisibleUnisonNote}), or undefined if this note's own notehead is visible or
+     * there is no such note. */
+    public visibleUnisonNoteSharingNotehead(): Note {
         if (this.printObject && this.notehead?.Shape !== NoteHeadShape.NONE) {
-            return false; // this note's own notehead is visible, nothing to share
+            return undefined; // this note's own notehead is visible, nothing to share
         }
         // Grace notes are ornaments before a main note, not a note sounding simultaneously - they share their
         // staff entry with that main note, so don't treat that as a unison (would falsely keep their stem).
         if (!this.pitch || !this.parentStaffEntry || this.voiceEntry?.IsGrace) {
-            return false;
+            return undefined;
         }
         for (const otherVoiceEntry of this.parentStaffEntry.VoiceEntries) {
             if (otherVoiceEntry === this.voiceEntry || otherVoiceEntry.IsGrace) {
@@ -246,11 +253,11 @@ export class Note {
                 if (otherNote.printObject && otherNote.notehead?.Shape !== NoteHeadShape.NONE && otherNote.pitch &&
                     otherNote.pitch.FundamentalNote === this.pitch.FundamentalNote &&
                     otherNote.pitch.Octave === this.pitch.Octave) {
-                    return true; // visible note on the same staff line in another voice
+                    return otherNote; // visible note on the same staff line in another voice
                 }
             }
         }
-        return false;
+        return undefined;
     }
     public get Arpeggio(): Arpeggio {
         return this.arpeggio;

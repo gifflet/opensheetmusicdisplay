@@ -89,10 +89,17 @@ export class VexFlowVoiceEntry extends GraphicalVoiceEntry {
 
             // notehead="none" asks for no notehead at all, so it always stays hidden. print-object="no" hides it
             // too, unless the note is drawn anyway because it shares a visible unison note's notehead: then it is
-            // drawn whole, notehead included, exactly like its stem below.
+            // drawn whole, notehead included, exactly like its stem below (see drawnAsSharedUnisonNote).
+            const sharedUnisonNote: Note = note.sourceNote.NoteBeam !== undefined ?
+                note.sourceNote.visibleUnisonNoteSharingNotehead() : undefined;
             const noteheadVisible: boolean = note.sourceNote.Notehead?.Shape !== NoteHeadShape.NONE &&
-                (note.sourceNote.PrintObject || VexFlowVoiceEntry.drawnAsSharedUnisonNote(note.sourceNote));
-            sourceNoteNoteheadColor = note.sourceNote.NoteheadColor;
+                (note.sourceNote.PrintObject || sharedUnisonNote !== undefined);
+            // A note drawn for its shared unison notehead takes that visible note's color: where Vexflow merges the
+            // two heads into one column, its head is inked exactly over the visible one (in draw order after it,
+            // if its voice comes later) and must not overprint a color set on that note - e.g. by an app
+            // highlighting the notes under the cursor, which never sees the hidden note. Where the head is laid out
+            // beside the visible one, it's colored like the head it stands in for.
+            sourceNoteNoteheadColor = (sharedUnisonNote ?? note.sourceNote).NoteheadColor;
             noteheadColor = sourceNoteNoteheadColor;
             // Switch between XML colors and automatic coloring
             if (this.rules.ColoringMode === ColoringModes.AutoColoring ||
