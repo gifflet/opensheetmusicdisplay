@@ -272,6 +272,48 @@ describe("VexFlow Measure", () => {
       }).catch(done);
    });
 
+   // Non-regression test for the same hidden unison note, in the case where Vexflow can't merge the two noteheads
+   // into one column: the hidden eighth's head can't be merged with the half note's, so Vexflow lays it out beside
+   // it, where it has to be drawn - a transparent head left the beam ending on a bare stem with nothing under it.
+   // Its tuplet has to count it too, otherwise the VF.Tuplet is built from the remaining notes and the number is
+   // centered over those. E.g. Debussy Arabesque no. 1 m.3, also Clair de lune and Liszt's Liebestraum no. 3.
+   it("Draws the notehead of a hidden unison note laid out beside the shared one, and counts it in its tuplet", (done: Mocha.Done) => {
+      const score: Document = TestUtils.getScore("test_unison_notehead_tuplet_arabesque_measure3.musicxml");
+      if (!score) {
+         done(new Error("Score file not found"));
+         return;
+      }
+      const osmd: OpenSheetMusicDisplay = TestUtils.createOpenSheetMusicDisplay(TestUtils.getDivElement(document));
+
+      osmd.load(score).then(() => {
+         osmd.render();
+         const gm: GraphicalMeasure = osmd.GraphicSheet.findGraphicalMeasure(0, 0);
+         // find the single invisible (print-object="no") note: the triplet's first eighth, in unison with the half note
+         let hiddenNoteheadStyle: { fillStyle?: string };
+         let hiddenVfStaveNote: any;
+         for (const se of gm.staffEntries) {
+            for (const gve of se.graphicalVoiceEntries) {
+               for (let i: number = 0; i < gve.notes.length; i++) {
+                  if (!gve.notes[i].sourceNote.PrintObject) {
+                     hiddenVfStaveNote = (gve as VexFlowVoiceEntry).vfStaveNote;
+                     hiddenNoteheadStyle = hiddenVfStaveNote.note_heads[i].getStyle();
+                  }
+               }
+            }
+         }
+         expect(hiddenVfStaveNote, "should find the invisible unison note").to.not.be.undefined;
+         // its notehead has a column of its own (the half note's head can't stand in for it), so it has to be drawn
+         expect(hiddenNoteheadStyle?.fillStyle, "unison notehead must not be transparent").to.not.equal("#00000000");
+         // and it is one of the triplet's three notes, so that the 3 is centered over all of them
+         const vftuplets: { [voiceID: number]: any[] } = (gm as any).vftuplets; // private, only needed here in the test
+         const allVfTuplets: any[] = Object.keys(vftuplets).reduce((all: any[], voiceID: string) => all.concat(vftuplets[voiceID]), []);
+         expect(allVfTuplets.length, "should find the triplet").to.equal(1);
+         expect(allVfTuplets[0].notes, "the triplet has to contain all three of its notes").to.have.lengthOf(3);
+         expect(allVfTuplets[0].notes, "the triplet has to contain the hidden note").to.include(hiddenVfStaveNote);
+         done();
+      }).catch(done);
+   });
+
    // Non-regression test for EngravingRules.RenderMeasureNumbersForImplicitMeasures.
    // Measures marked implicit="yes" in the MusicXML (e.g. measures without a meter like in Satie's Gnossiennes)
    // don't show a measure number by default, as per the MusicXML standard, but do when the rule is enabled.
