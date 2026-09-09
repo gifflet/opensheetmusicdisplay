@@ -639,25 +639,24 @@ export class ExpressionReader {
                 this.directionTimestamp = Fraction.createFromFraction(inSourceMeasureCurrentFraction);
             }
             const numberXml: number = this.readNumber(dynamicsNode); // probably never given, just to comply with createExpressionIfNeeded()
-            let expressionText: string = dynamicsNode.elements()[0]?.name; // elements can in rare cases still be empty even though hasElements=true, see #1269
-            if (expressionText === "other-dynamics") {
-                expressionText = dynamicsNode.elements()[0].value;
-            }
+            const dynamicsElements: IXmlElement[] = dynamicsNode.elements();
+            // A single <dynamics> element may contain multiple symbols, e.g. <sf/><mp/>.
+            const expressionText: string = dynamicsElements
+                .map((element: IXmlElement): string => element.name === "other-dynamics" ? element.value : element.name)
+                .join("")
+                .trim(); // e.g. Finale writes <other-dynamics> marcato</other-dynamics> with a leading space
             if (expressionText) {
+                // The playback dynamic of the marking: sf for <sf/><mp/> (sfmp) as well as for the same marking spelled
+                //   letter by letter, ff for <other-dynamics>ffz</other-dynamics>, f for "f con fuoco", none for "cresc.".
+                const dynamicEnum: DynamicEnum = InstantaneousDynamicExpression.dynamicEnumFromText(expressionText);
                 // ToDo: make duplicate recognition an afterReadingModule, as we can't definitively check here if there is a repetition:
                 // Compare with the active dynamic expression and only add it if there is a change in dynamic
                 // Exception is when a repetition starts here, where the "repeated" dynamic might be desired.
                 // see PR #767 where this was removed
                 if (currentMeasure.Rules?.IgnoreRepeatedDynamics) {
-                    let dynamicEnum: DynamicEnum;
-                    try {
-                        dynamicEnum = DynamicEnum[expressionText];
-                    } catch (err) {
-                        const errorMsg: string = ITextTranslation.translateText("ReaderErrorMessages/DynamicError", "Error while reading dynamic.");
-                        this.musicSheet.SheetErrors.pushMeasureError(errorMsg);
-                        return;
-                    }
-                    if (this.activeInstantaneousDynamic?.DynEnum === dynamicEnum) {
+                    // Compare the whole marking, not just its playback enum (the first symbol of a combined marking):
+                    //   <sf/><p/> right after <sf/><mp/> is a different marking, not a repeated sf.
+                    if (this.activeInstantaneousDynamic?.DynamicExpression?.toLowerCase() === expressionText.toLowerCase()) {
                         // repeated dynamic
                         return;
                     }
@@ -668,13 +667,25 @@ export class ExpressionReader {
                     this.createNewMultiExpressionIfNeeded(currentMeasure, numberXml,
                         Fraction.createFromFraction(inSourceMeasureCurrentFraction));
                 }
+                // A second dynamic at the same position on the same staff, e.g. Finale's "ff marcato" written as <ff/> plus
+                //   <other-dynamics>marcato</other-dynamics> in two <direction>s: the MultiExpression holds only one
+                //   instantaneous dynamic, so combine both into one marking instead of losing the first one.
+                const existingDynamic: InstantaneousDynamicExpression = this.getMultiExpression.InstantaneousDynamic;
+                let markingText: string = expressionText;
+                let markingEnum: DynamicEnum = dynamicEnum;
+                if (existingDynamic && existingDynamic.StaffNumber === this.staffNumber &&
+                    existingDynamic.DynamicExpression.toLowerCase() !== expressionText.toLowerCase()) {
+                    markingText = existingDynamic.DynamicExpression + " " + expressionText;
+                    markingEnum = existingDynamic.DynEnum ?? dynamicEnum; // the playback dynamic of "ff marcato" is the ff
+                }
                 const instantaneousDynamicExpression: InstantaneousDynamicExpression =
                     new InstantaneousDynamicExpression(
-                        expressionText,
+                        markingText,
                         this.soundDynamic,
                         this.placement,
                         this.staffNumber,
-                        currentMeasure);
+                        currentMeasure,
+                        markingEnum);
                 instantaneousDynamicExpression.InMeasureTimestamp = inSourceMeasureCurrentFraction.clone();
                 this.getMultiExpression.addExpression(instantaneousDynamicExpression, "");
                 // addExpression unnecessary now?:
@@ -684,8 +695,11 @@ export class ExpressionReader {
                 //  initialize also resets this.placement to NotYetDefined, would be an issue for multiple direction-type nodes in one direction node.
                 if (this.activeInstantaneousDynamic) {
                     this.activeInstantaneousDynamic.DynEnum = instantaneousDynamicExpression.DynEnum;
+                    this.activeInstantaneousDynamic.DynamicExpression = instantaneousDynamicExpression.DynamicExpression;
                 } else {
-                    this.activeInstantaneousDynamic = new InstantaneousDynamicExpression(expressionText, 0, PlacementEnum.NotYetDefined, 1, currentMeasure);
+                    this.activeInstantaneousDynamic = new InstantaneousDynamicExpression(instantaneousDynamicExpression.DynamicExpression, 0,
+                                                                                         PlacementEnum.NotYetDefined, 1, currentMeasure,
+                                                                                         instantaneousDynamicExpression.DynEnum);
                 }
                 //}
             }

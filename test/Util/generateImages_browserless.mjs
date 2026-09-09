@@ -346,7 +346,7 @@ async function generateSampleImage (sampleFilename, directory, osmdInstance, osm
     }
     debug("xml loaded", DEBUG);
     try {
-        osmdInstance.render();
+        renderOsmdTestSample(sampleFilename, osmdInstance, osmdTestMode);
         const isTestTransposingAccidentals = sampleFilename.includes("test_transposing_accidentals_1383");
         const isTestTransposingCsharpMajorToCAndBack = sampleFilename.includes("test_transposing_csharp_major_to_c_and_back_to_csharp");
 
@@ -475,6 +475,30 @@ function makeSkyBottomLineOptions() {
     }
 }
 
+/**
+ * Renders the sample loaded into osmdInstance. Normally by one render() call; in osmdTestingMode, a sample with
+ * "renderNext" in its filename is instead rendered incrementally ("system by system", see
+ * OpenSheetMusicDisplay.renderNext()), one system per batch until the whole sheet is drawn, so that the visual
+ * regression tests cover the incremental rendering path as well, e.g. the copyright being drawn below the last
+ * system (#1710). A finished incremental render should look the same as a normal render() of the sample.
+ * @param {string} sampleFilename Filename of the sample, selects the rendering method.
+ * @param {object} osmdInstance The OSMD instance the sample was loaded into.
+ * @param {boolean} osmdTestMode Whether we are in osmdTestingMode (--osmdtesting), where sample-specific settings apply.
+ */
+function renderOsmdTestSample(sampleFilename, osmdInstance, osmdTestMode) {
+    const isTestRenderNext = osmdTestMode && sampleFilename.includes("renderNext");
+    if (!isTestRenderNext) {
+        osmdInstance.render();
+        return;
+    }
+    // one system per batch, like scrolling through the score. The final batch draws the last system and the copyright.
+    const maxBatches = osmdInstance.Sheet.SourceMeasures.length + 2; // safety limit, a batch renders at least one measure
+    let result = osmdInstance.renderNext({ systems: 1 });
+    for (let batch = 1; !result.done && batch < maxBatches; batch++) {
+        result = osmdInstance.renderNext({ systems: 1 });
+    }
+}
+
 function setOsmdTestOptionsBeforeLoad(sampleFilename, options, osmdInstance) {
     // set sample-specific options for OSMD visual regression testing
     let includeSkyBottomLine = false;
@@ -501,6 +525,7 @@ function setOsmdTestOptionsBeforeLoad(sampleFilename, options, osmdInstance) {
     const isTestTupletRatioed = sampleFilename.includes("test_tuplet_ratioed");
     const isTestDrawFromMeasureNumber9ClefChange = sampleFilename.includes("test_drawFromMeasureNumber_9_respect_earlier_clef_changes");
     const isTestOctaveShiftMultiline = sampleFilename.includes("test_octaveshift_multiline");
+    const isTestCopyrightBelowLastSystem = sampleFilename.includes("copyright_below_last_system");
     osmdInstance.EngravingRules.loadDefaultValues(); // note this may also be executed in setOptions below via drawingParameters default
     if (isTestEndClefStaffEntryBboxes) {
         options.drawBoundingBoxString = "VexFlowStaffEntry";
@@ -590,6 +615,10 @@ function setOsmdTestOptionsBeforeLoad(sampleFilename, options, osmdInstance) {
     }
     if (isTestOctaveShiftMultiline) {
         osmdInstance.EngravingRules.RenderXMeasuresPerLineAkaSystem = 1; // render 1 measure per "line" -> multiline
+    }
+    if (isTestCopyrightBelowLastSystem) {
+        osmdInstance.EngravingRules.RenderCopyright = true; // default false. the copyright (<rights>) is drawn below the last system
+        osmdInstance.EngravingRules.NewSystemAtXMLNewSystemAttribute = true; // the sample's system breaks -> 4 systems regardless of width
     }
     return options;
 }

@@ -865,6 +865,11 @@ export class VexFlowMeasure extends GraphicalMeasure {
         let gvEntries: GraphicalVoiceEntry[] = this.getGraphicalVoiceEntriesPerVoice(voice);
         for (let idx: number = 0; idx < gvEntries.length; idx++) {
             const gve: GraphicalVoiceEntry = gvEntries[idx];
+            if (gve.parentVoiceEntry?.GraceAfterMainNote) {
+                // grace notes after their main note share its timestamp (see InstrumentReader.attachGraceNotesAfterMainNote)
+                //   and take no time of their own: they must not create a gap (ghost rest) between the main note and the measure end
+                continue;
+            }
             const gNotesStartTimestamp: Fraction = gve.notes[0].sourceNote.getAbsoluteTimestamp();
             // find the voiceEntry end timestamp:
             let gNotesEndTimestamp: Fraction = new Fraction();
@@ -1349,9 +1354,17 @@ export class VexFlowMeasure extends GraphicalMeasure {
             // create vex flow Stave Notes:
             for (const gve of graphicalStaffEntry.graphicalVoiceEntries) {
                 if (gve.parentVoiceEntry.IsGrace) {
+                    graveGVoiceEntriesAdded.push(gve);
+                    if (gve.parentVoiceEntry.GraceAfterMainNote) {
+                        // grace notes after their main note (a Nachschlag, e.g. ending a trill at the end of the measure) share
+                        //   the main note's staff entry (see InstrumentReader.attachGraceNotesAfterMainNote), but are drawn as
+                        //   stand-alone grace notes right of it: own tickables of the vexflow voice (added below),
+                        //   not a GraceNoteGroup attached to a following main note.
+                        (gve as VexFlowVoiceEntry).vfStaveNote = VexFlowConverter.StaveNote(gve);
+                        continue;
+                    }
                     // save grace notes for the next non-grace note
                     graceGVoiceEntriesBefore.push(gve);
-                    graveGVoiceEntriesAdded.push(gve);
                     if (!graceSlur) {
                         graceSlur = gve.parentVoiceEntry.GraceSlur;
                     }
@@ -1486,7 +1499,8 @@ export class VexFlowMeasure extends GraphicalMeasure {
                 //   but there are many legitimate clefs e.g. in 2nd voices, and this doesn't seem to cause issues.
                 //if (isMainVoice) {
                 const vfse: VexFlowStaffEntry = vexFlowVoiceEntry.parentStaffEntry as VexFlowStaffEntry;
-                if (vfse && vfse.vfClefBefore) {
+                // (not for grace notes after their main note, which share its staff entry but are drawn right of it)
+                if (vfse && vfse.vfClefBefore && !voiceEntry.parentVoiceEntry?.GraceAfterMainNote) {
                     if (voiceEntry.notes[0] && !voiceEntry.notes[0].sourceNote.PrintObject) {
                         const clefColor: string = this.rules.DefaultColorMusic || "#000000";
                         // need to cast to any because ClefNote actually extends Note, which extends Tickable, which extends Element,

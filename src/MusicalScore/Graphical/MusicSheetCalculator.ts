@@ -2271,7 +2271,11 @@ export abstract class MusicSheetCalculator {
                         this.handleBeam(graphicalNote, note.NoteBeam, openBeams);
                     }
                 }
-                if (note.NoteTuplets.length > 0 && note.PrintObject) {
+                // Same for its tuplet: hidden or not, the note is one of the tuplet's notes, so the tuplet number
+                // (and bracket) has to span it. Leaving it out built the VF.Tuplet from the remaining notes and
+                // centered the number over those, off the beam's center.
+                // E.g. Debussy Arabesque no. 1 m.3 (test_unison_notehead_tuplet_arabesque_measure3).
+                if (note.NoteTuplets.length > 0 && (note.PrintObject || note.sharesNoteheadWithVisibleUnisonNote())) {
                     // a note can be part of more than one tuplet (nested tuplets); add it to each of them
                     for (const noteTuplet of note.NoteTuplets) {
                         this.handleTuplet(graphicalNote, noteTuplet, openTuplets);
@@ -2682,6 +2686,7 @@ export abstract class MusicSheetCalculator {
             relative.y = lastSystemAbsoluteBottomMargin + this.rules.SheetCopyrightMargin;
             relative.y -= copyright.PositionAndShape.BorderTop;
             copyright.PositionAndShape.RelativePosition = relative;
+            copyright.AnchoredToPageBottom = true; // below the last system: drawn only once the layout is complete (#1710)
             page.Labels.push(copyright);
         }
         // we need to do this again to not cut off the title for short scores:
@@ -2900,6 +2905,33 @@ export abstract class MusicSheetCalculator {
         return verticalMeasureList;
     }
 
+    /**
+     * Returns the octave shift active at the given timestamp in a staff: the measure's open one (started in an earlier measure)
+     * if the timestamp lies within it, otherwise one of the measure's own octave shifts, or undefined if none is active.
+     */
+    private getActiveOctaveShift(absoluteTimestamp: Fraction, openOctaveShift: OctaveShiftParams, octaveShifts: MultiExpression[]): OctaveShift {
+        if (openOctaveShift &&
+            openOctaveShift.getAbsoluteStartTimestamp.lte(absoluteTimestamp) &&
+            absoluteTimestamp.lte(openOctaveShift.getAbsoluteEndTimestamp) &&
+            openOctaveShift.getOpenOctaveShift.Type !== OctaveEnum.NONE) {
+            return openOctaveShift.getOpenOctaveShift;
+        }
+        // check for existing octave shifts outside openOctaveShifts
+        for (const octaveShift of octaveShifts) {
+            let targetOctaveShift: OctaveShift;
+            if (octaveShift.OctaveShiftStart) {
+                targetOctaveShift = octaveShift.OctaveShiftStart;
+            } else if (octaveShift.OctaveShiftEnd) {
+                targetOctaveShift = octaveShift.OctaveShiftEnd;
+            }
+            if (targetOctaveShift?.ParentStartMultiExpression?.AbsoluteTimestamp.lte(absoluteTimestamp) &&
+                !targetOctaveShift.ParentEndMultiExpression?.AbsoluteTimestamp.lt(absoluteTimestamp)) {
+                return targetOctaveShift;
+            }
+        }
+        return undefined;
+    }
+
     private createGraphicalMeasure(sourceMeasure: SourceMeasure, openTuplets: Tuplet[], openBeams: Beam[],
                                    accidentalCalculator: AccidentalCalculator, activeClefs: ClefInstruction[],
                                    openOctaveShifts: OctaveShiftParams[], openLyricWords: LyricWord[], staffIndex: number,
@@ -2970,6 +3002,10 @@ export abstract class MusicSheetCalculator {
                 );
             }
         }
+        /** grace notes after their main note (VoiceEntry.GraceAfterMainNote), handled after all other entries of the measure, see below */
+        const graceEntriesAfterMainNote: {
+            voiceEntry: VoiceEntry; graphicalStaffEntry: GraphicalStaffEntry; sourceStaffEntry: SourceStaffEntry; linkedNotes: Note[];
+        }[] = [];
         // create GraphicalStaffEntries - always check for possible null Entry
         for (let entryIndex: number = 0; entryIndex < sourceMeasure.VerticalSourceStaffEntryContainers.length; entryIndex++) {
             const sourceStaffEntry: SourceStaffEntry = sourceMeasure.VerticalSourceStaffEntryContainers[entryIndex].StaffEntries[staffIndex];
@@ -2999,35 +3035,15 @@ export abstract class MusicSheetCalculator {
                     this.handleStaffEntryLink(graphicalStaffEntry, staffEntryLinks);
                 }
                 // check for possible OctaveShift
-                let octaveShiftValue: OctaveEnum = OctaveEnum.NONE;
-                let activeOctaveShift: OctaveShift;
-                if (openOctaveShifts[staffIndex]) {
-                    if (openOctaveShifts[staffIndex].getAbsoluteStartTimestamp.lte(sourceStaffEntry.AbsoluteTimestamp) &&
-                        sourceStaffEntry.AbsoluteTimestamp.lte(openOctaveShifts[staffIndex].getAbsoluteEndTimestamp)) {
-                        octaveShiftValue = openOctaveShifts[staffIndex].getOpenOctaveShift.Type;
-                        activeOctaveShift = openOctaveShifts[staffIndex].getOpenOctaveShift;
-                    }
-                }
-                if (octaveShiftValue === OctaveEnum.NONE) {
-                    // check for existing octave shifts outside openOctaveShifts
-                    for (const octaveShift of octaveShifts) {
-                        let targetOctaveShift: OctaveShift;
-                        if (octaveShift.OctaveShiftStart) {
-                            targetOctaveShift = octaveShift.OctaveShiftStart;
-                        } else if (octaveShift.OctaveShiftEnd) {
-                            targetOctaveShift = octaveShift.OctaveShiftEnd;
-                        }
-                        if (targetOctaveShift?.ParentStartMultiExpression?.AbsoluteTimestamp.lte(sourceStaffEntry.AbsoluteTimestamp) &&
-                            !targetOctaveShift.ParentEndMultiExpression?.AbsoluteTimestamp.lt(sourceStaffEntry.AbsoluteTimestamp)) {
-                                octaveShiftValue = targetOctaveShift.Type;
-                                activeOctaveShift = targetOctaveShift;
-                                break;
-                            }
-                    }
-                }
+                let activeOctaveShift: OctaveShift = this.getActiveOctaveShift(sourceStaffEntry.AbsoluteTimestamp, openOctaveShifts[staffIndex], octaveShifts);
+                let octaveShiftValue: OctaveEnum = activeOctaveShift?.Type ?? OctaveEnum.NONE;
                 // for each visible Voice create the corresponding GraphicalNotes
                 for (let idx: number = 0, len: number = sourceStaffEntry.VoiceEntries.length; idx < len; ++idx) {
                     const voiceEntry: VoiceEntry = sourceStaffEntry.VoiceEntries[idx];
+                    if (voiceEntry.GraceAfterMainNote) {
+                        graceEntriesAfterMainNote.push({ voiceEntry, graphicalStaffEntry, sourceStaffEntry, linkedNotes });
+                        continue; // handled after all other entries of the measure, see below
+                    }
                     // When an octave shift stop falls between grace notes at the same timestamp,
                     // turn off the shift for VoiceEntries parsed after the stop.
                     if (octaveShiftValue !== OctaveEnum.NONE && activeOctaveShift &&
@@ -3064,6 +3080,34 @@ export abstract class MusicSheetCalculator {
                         this.graphicalMusicSheet.ParentMusicSheet.Transpose);
                 }
             }
+        }
+
+        // Grace notes after their main note (e.g. a Nachschlag ending a trill, VoiceEntry.GraceAfterMainNote) share the main note's
+        //   staff entry (see InstrumentReader.attachGraceNotesAfterMainNote), but are drawn right of it, where the main note ends.
+        //   They are handled after all other entries of the measure, so that accidentals, an in-staff clef change and octave shifts
+        //   apply to them as at that later position, as when they still had their own staff entry there.
+        let indexAfterMainNote: number = 0;
+        for (let i: number = 0; i < graceEntriesAfterMainNote.length; i++) {
+            const { voiceEntry, graphicalStaffEntry, sourceStaffEntry, linkedNotes }: typeof graceEntriesAfterMainNote[0] = graceEntriesAfterMainNote[i];
+            // the index among the grace notes after the same main note: the index they had in their own staff entry
+            indexAfterMainNote = i > 0 && graceEntriesAfterMainNote[i - 1].sourceStaffEntry === sourceStaffEntry ? indexAfterMainNote + 1 : 0;
+            // where the grace notes are drawn: at the end of the main note (the longest note of the staff entry)
+            const drawnTimestamp: Fraction = Fraction.plus(sourceStaffEntry.AbsoluteTimestamp, sourceStaffEntry.calculateMaxNoteLength(false));
+            const activeOctaveShift: OctaveShift = this.getActiveOctaveShift(drawnTimestamp, openOctaveShifts[staffIndex], octaveShifts);
+            let octaveShiftValue: OctaveEnum = activeOctaveShift?.Type ?? OctaveEnum.NONE;
+            // an octave shift stop between the grace notes ends the shift for the grace notes after it (see above)
+            if (activeOctaveShift && activeOctaveShift.endVoiceEntryIndex > 0 &&
+                activeOctaveShift.ParentEndMultiExpression?.AbsoluteTimestamp.Equals(drawnTimestamp) &&
+                indexAfterMainNote >= activeOctaveShift.endVoiceEntryIndex) {
+                octaveShiftValue = OctaveEnum.NONE;
+            }
+            this.handleVoiceEntry(
+                voiceEntry, graphicalStaffEntry,
+                accidentalCalculator, openLyricWords,
+                activeClefs[staffIndex], openTuplets,
+                openBeams, octaveShiftValue, staffIndex,
+                linkedNotes, sourceStaffEntry
+            );
         }
 
         accidentalCalculator.doCalculationsAtEndOfMeasure();
@@ -3390,6 +3434,7 @@ export abstract class MusicSheetCalculator {
                             gLabel.PositionAndShape.RelativePosition.x = staffEntryPositionX;
                             gLabel.setLabelPositionAndShapeBorders();
                             gLabel.PositionAndShape.calculateBoundingBox();
+                            gLabel.sourceNote = fingering.sourceNote;
                             gse.FingeringEntries.push(gLabel);
                             const start: number = gLabel.PositionAndShape.RelativePosition.x + gLabel.PositionAndShape.BorderLeft;
                             //start -= line.PositionAndShape.RelativePosition.x;
@@ -4082,8 +4127,14 @@ export abstract class MusicSheetCalculator {
             }
         } else {
             if (voiceEntry.ParentVoice instanceof LinkedVoice) {
-                // Linked voice: set stem down:
-                voiceEntry.WantedStemDirection = StemDirectionType.Down;
+                // Linked (secondary) voice: stem down. With AutoStemSecondaryVoicesWhenAloneInMeasure, a secondary
+                //   voice that is the only voice with entries in this measure on this staff has no voice to avoid and
+                //   keeps WantedStemDirection undefined, i.e. gets pitch-based stems (#1719). Checking only the same
+                //   staff entry would not do: under a sustained main-voice note the secondary voice's notes would
+                //   flip to pitch-based stems mid-measure (e.g. The Entertainer m.56).
+                if (!this.rules.AutoStemSecondaryVoicesWhenAloneInMeasure || this.otherVoicePresentInMeasure(voiceEntry)) {
+                    voiceEntry.WantedStemDirection = StemDirectionType.Down;
+                }
             } else {
                 // if this voiceEntry belongs to the mainVoice:
                 // check first that there are also more voices present:
@@ -4094,6 +4145,24 @@ export abstract class MusicSheetCalculator {
             }
         }
         // setBeamNotesWantedStemDirections() will be called at end of measure (createGraphicalMeasure)
+    }
+
+    /** Whether a voice other than the given entry's has an entry (note or rest) in the same measure on the same staff. */
+    private otherVoicePresentInMeasure(voiceEntry: VoiceEntry): boolean {
+        const staffEntry: SourceStaffEntry = voiceEntry.ParentSourceStaffEntry;
+        const staffIndex: number = staffEntry.ParentStaff.idInMusicSheet;
+        for (const container of staffEntry.VerticalContainerParent.ParentMeasure.VerticalSourceStaffEntryContainers) {
+            const otherStaffEntry: SourceStaffEntry = container.StaffEntries[staffIndex];
+            if (!otherStaffEntry) {
+                continue;
+            }
+            for (const otherVoiceEntry of otherStaffEntry.VoiceEntries) {
+                if (otherVoiceEntry.ParentVoice !== voiceEntry.ParentVoice) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /** Sets a voiceEntry's stem direction to one already set in other notes in its beam, if it has one. */

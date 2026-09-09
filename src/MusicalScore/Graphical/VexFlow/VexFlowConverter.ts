@@ -1059,10 +1059,18 @@ export class VexFlowConverter {
             duration += "d";
         }
 
-        const vfnote: VF.TabNote = new VF.TabNote({
+        const tabNoteStruct: { duration: string, positions: {str: number, fret: number}[] } = {
             duration: duration,
             positions: tabPositions,
-        });
+        };
+        let vfnote: VF.TabNote;
+        if (gve.parentVoiceEntry?.IsGrace) {
+            // Grace note in a tab staff: Vexflow's GraceTabNote draws the fret number smaller (scale 0.6, 7.5pt instead of 10pt font).
+            //   It is drawn as part of a GraceNoteGroup attached to its main note, see VexFlowTabMeasure.graphicalMeasureCreatedCalculations() (#1721)
+            vfnote = new (VF as any).GraceTabNote(tabNoteStruct); // GraceTabNote is missing in the vexflow typings
+        } else {
+            vfnote = new VF.TabNote(tabNoteStruct);
+        }
         if (isXNotehead) {
             // (vfnote as any).render_options.fretScale = rules.TabXNoteheadScale; // doesn't work, is overwritten later
             (vfnote as any).render_options.scale = rules.TabXNoteheadScale; // VexFlowPatch
