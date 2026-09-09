@@ -308,8 +308,25 @@ export class MusicSheetReader /*implements IMusicSheetReader*/ {
     }
 
     /** A verse needs re-linking when a non-single syllable has no word (orphan)
-     *  or a word chain does not start with "begin" and finish with "end". */
-    private hasBrokenLyricWordChains(list: { entry: LyricsEntry }[]): boolean {
+     *  or a word chain does not start with "begin" and finish with "end".
+     *
+     *  Only verses whose syllables actually live in more than one voice qualify:
+     *  this fix is about chains split ACROSS voices, and a verse sung by a single
+     *  voice cannot have one. Without that guard the rebuild also ran on
+     *  single-voice scores, where two simultaneous notes may legitimately carry
+     *  the same syllable — the rebuild dropped the duplicate out of its word and
+     *  the dash disappeared from files that had always rendered correctly
+     *  (test_divisions_after_first_note_JingleBellRock_extract, Schubert_An_die_Musik,
+     *  Cornelius_P_Christbaum, test_notations_nodes_dorico_say_something,
+     *  Land_der_Berge). */
+    private hasBrokenLyricWordChains(list: { voiceId: number, entry: LyricsEntry }[]): boolean {
+        const voices: Set<number> = new Set();
+        for (const timed of list) {
+            voices.add(timed.voiceId);
+        }
+        if (voices.size < 2) {
+            return false;
+        }
         const words: Set<LyricWord> = new Set();
         for (const timed of list) {
             const entry: LyricsEntry = timed.entry;

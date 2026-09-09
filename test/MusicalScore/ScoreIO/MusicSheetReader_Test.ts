@@ -379,5 +379,50 @@ describe("Music Sheet Reader", () => {
             expect(riEntry.Word.Syllables.length).to.equal(1); // dangling "begin"
             done();
         });
+
+        // Regression guard for the review on PR #1708: the rebuild used to run on
+        // single-voice scores too, and there two simultaneous notes may legitimately
+        // carry the same syllable. Dropping the duplicate out of its word erased
+        // dashes from files that had always rendered correctly — five visual
+        // regression samples caught it. A verse sung by one voice cannot have a
+        // chain split across voices, so it must come out byte-identical.
+        it("leaves a single-voice score untouched, dashes included", (done: Mocha.Done) => {
+            const samplePath: string = "test/data/test_divisions_after_first_note_JingleBellRock_extract.musicxml";
+
+            function wordShapes(rules?: EngravingRules): string[] {
+                const doc: Document = getSheet(samplePath);
+                expect(doc, samplePath + " should be preprocessed by karma").to.not.be.undefined;
+                const sampleScore: IXmlElement = new IXmlElement(doc.getElementsByTagName("score-partwise")[0]);
+                const sampleSheet: MusicSheet = new MusicSheetReader(undefined, rules)
+                    .createMusicSheet(sampleScore, samplePath);
+                const shapes: string[] = [];
+                for (const measure of sampleSheet.SourceMeasures) {
+                    for (const container of measure.VerticalSourceStaffEntryContainers) {
+                        for (const staffEntry of container.StaffEntries) {
+                            if (!staffEntry) {
+                                continue; // sparse slot, same guard the reader uses
+                            }
+                            for (const voiceEntry of staffEntry.VoiceEntries) {
+                                voiceEntry.LyricsEntries.forEach((verse: string, entry: LyricsEntry): void => {
+                                    // The dash lives in the word chain: a syllable that
+                                    // loses its word loses the dash next to it.
+                                    shapes.push(entry.Word
+                                        ? verse + ":" + entry.SyllableIndex + "/" + entry.Word.Syllables.length
+                                        : verse + ":none");
+                                });
+                            }
+                        }
+                    }
+                }
+                return shapes;
+            }
+
+            const disabled: EngravingRules = new EngravingRules();
+            disabled.RelinkLyricWordsAcrossVoices = false;
+            const withFeature: string[] = wordShapes();
+            expect(withFeature.length, "sample should carry lyrics").to.be.greaterThan(0);
+            expect(withFeature).to.deep.equal(wordShapes(disabled));
+            done();
+        });
     });
 });
